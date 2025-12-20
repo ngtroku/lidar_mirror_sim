@@ -1,0 +1,14 @@
+{
+  "main": {
+    "input_file": "./12_17_hap_simulated.bag",
+    "lidar_topic": "/livox/lidar",
+    "topic_length": 12,
+    "visualize": true
+  },
+  "registration": {
+    "registration_type": "GICP",
+    "downsampling_resolution": 0.25,
+    "max_correspondence_distance": 1.0,
+    "num_threads": 4
+  }
+}
