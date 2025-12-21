@@ -261,7 +261,7 @@ def objective(trial):
 
 if __name__ == "__main__":
     optimization = optuna.create_study(direction='maximize')
-    optimization.optimize(objective, n=3)
+    optimization.optimize(objective, n_trials=3)
 
     print(f'Best value: {optimization.best_value}')
     print(f'Best param: {optimization.best_params}')
