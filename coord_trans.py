@@ -19,6 +19,6 @@ def world_to_local(world_points, sensor_pos, sensor_quat):
 
     local_points = (R_inv @ (world_points - np.array(sensor_pos)).T).T
 
-    local_x, local_y, local_z = local_points[:,0], local_points[:,1], local_points[:,2]
+    #local_x, local_y, local_z = local_points[:,0], local_points[:,1], local_points[:,2]
 
-    return local_x, local_y, local_z
+    return local_points

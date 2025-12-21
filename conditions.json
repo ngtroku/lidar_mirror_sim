@@ -1,0 +1,23 @@
+{
+  "main": {
+    "bag_path": "./12_17_hap_00.bag",
+    "gt_path": "./traj_lidar.txt",
+    "map_path": "./benign_pcd_full.pcd",
+    "lidar_topic": "/livox/lidar",
+    "imu_topic": "/livox/imu"
+  },
+  "mirror": {
+    "center": [8.0, 0, 0.4],
+    "width": 1.0,
+    "height": 0.4,
+    "yaw_base": -30,
+    "swing_speed": 5.0,
+    "swing_range": 30.0
+  },
+  "lidar": {
+    "fov_h": 120.0,
+    "fov_v": 25.0,
+    "topic_length": 18,
+    "frequency": 10.0
+  }
+}
