@@ -75,6 +75,81 @@ def check_intersection(point_cloud_data: np.ndarray, center: list, width: float,
 
     return is_reflected
 
+def faster_check_intersection(point_cloud_data: np.ndarray, center: list, width: float, height: float, yaw_angle: float, sensor_pos: list) -> np.ndarray:
+
+    # 1. 定数の準備
+    O = np.array(sensor_pos)
+    C = np.array(center)
+    half_width = width / 2.0
+    half_height = height / 2.0
+
+    yaw_rad = np.deg2rad(yaw_angle)
+    cos_y = np.cos(yaw_rad)
+    sin_y = np.sin(yaw_rad)
+    
+    # ローカルから世界座標への回転行列 Rz
+    Rz = np.array([
+        [cos_y, -sin_y, 0],
+        [sin_y,  cos_y, 0],
+        [0, 0, 1]
+    ])
+    
+    # 鏡の法線ベクトル（世界座標系）
+    normal_world = Rz @ np.array([0, 1, 0])
+    
+    # 2. 光線の計算
+    # 各点 P に対して ray_direction = P - O
+    ray_directions = point_cloud_data - O  # (N, 3)
+    
+    # 3. 交点パラメータ t の一括計算
+    # 線の式: L = O + t * ray_direction
+    # 面の式: (L - C)・normal_world = 0
+    # t = ((C - O)・normal_world) / (ray_direction・normal_world)
+    
+    # 分母 (N,)
+    denominators = ray_directions @ normal_world
+    
+    # 分子 (スカラー)
+    numerator = np.dot(C - O, normal_world)
+    
+    # ゼロ除算を避けるためのマスク
+    valid_mask = np.abs(denominators) > 1e-6
+    
+    # t を計算 (N,)
+    # 有効な分母以外は一旦 0 にして計算し、後でマスクをかける
+    t = np.zeros_like(denominators)
+    t[valid_mask] = numerator / denominators[valid_mask]
+    
+    # 4. 範囲チェック (t の条件)
+    # 0 < t <= 1.0 : センサーと点 P の間に鏡がある
+    t_mask = valid_mask & (t > 0.0) & (t <= 1.0)
+    
+    # 5. 交点の世界座標を計算
+    # I = O + t * ray_direction (対象となる点のみ)
+    # 効率化のため、t_mask が True の点だけ計算する
+    indices = np.where(t_mask)[0]
+    if len(indices) == 0:
+        return np.zeros(point_cloud_data.shape[0], dtype=bool)
+    
+    I_world = O + t[indices, np.newaxis] * ray_directions[indices]
+    
+    # 6. 鏡のローカル座標系への変換と境界チェック
+    # I_local = Rz^T @ (I_world - C)
+    I_local_shifted = I_world - C
+    # 行列演算で一括変換 (I_local_shifted @ Rz は 各行ベクトル v に v @ Rz を適用することと同等)
+    I_local = I_local_shifted @ Rz
+    
+    x_local = I_local[:, 0]
+    z_local = I_local[:, 2]
+    
+    # 境界チェック
+    inside_mask = (np.abs(x_local) <= half_width) & (np.abs(z_local) <= half_height)
+    
+    # 最終的な結果配列の作成
+    is_reflected = np.zeros(point_cloud_data.shape[0], dtype=bool)
+    is_reflected[indices[inside_mask]] = True
+    
+    return is_reflected
 
 def reflection_sim(points, sensor_pos, sensor_ori, mirror_center, mirror_width, mirror_height, R):
     """

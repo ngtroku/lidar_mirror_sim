@@ -3,6 +3,7 @@ import open3d as o3d
 import time, json
 from pathlib import Path
 import optuna
+import matplotlib.pyplot as plt
 
 # rosbags libraries
 from rosbags.highlevel import AnyReader
@@ -77,43 +78,81 @@ def decide_mirror_yaw_triangular(base_yaw, swing_range, rotation_speed, current_
     return base_yaw + offset
 
 def simulator(param_yaw_center, param_swing_speed, param_swing_range):
+
     # Load registration config
+
     with open('config.json', 'r') as f:
+
         config = json.load(f)
 
+
+
     # Load simulation conditions
+
     with open('conditions.json', 'r') as f:
+
         conditions = json.load(f)
 
+
+
     # --- Parse Variables from Conditions ---
+
     # Main settings
+
     bag_path = Path(conditions['main']['bag_path'])
+
     gt_path = Path(conditions['main']['gt_path'])
+
     map_path = Path(conditions['main']['map_path'])
+
     lidar_topic_in = conditions['main']['lidar_topic']
+
     imu_topic = conditions['main']['imu_topic']
 
+
+
     # Mirror settings
+
     mirror_center = conditions['mirror']['center']
+
+    #mirror_center = [param_x, param_y, 0.4]
+
     mirror_width = conditions['mirror']['width']
+
     mirror_height = conditions['mirror']['height']
+
     mirror_yaw_base = param_yaw_center
     swing_speed = param_swing_speed
+    #swing_speed = 5.0 # deg/s
     swing_range = param_swing_range
+    #swing_range = 105 # degree
 
     # LiDAR settings
+
     FOV_H = conditions['lidar']['fov_h']
+
     FOV_V = conditions['lidar']['fov_v']
+
     topic_length = conditions['lidar']['topic_length']
+
     lidar_freq = conditions['lidar']['frequency']
 
+
+
     # --- Initialize Variables for Process ---
+
     source_points = None
+
     target_points = None
+
     global_transform = np.identity(4) # Estimated Pose
+
     estimate_x, estimate_y, estimate_z = [0.0], [0.0], [0.0] # Trajectory history
 
+
+
     # --- Load Data ---
+
     print(f"Loading Ground Truth from {gt_path}...")
     gt_x, gt_y, gt_z, gt_qw, gt_qx, gt_qy, gt_qz = load_files.load_benign_pose(gt_path)
 
@@ -121,86 +160,124 @@ def simulator(param_yaw_center, param_swing_speed, param_swing_range):
     map_points_np = load_files.load_pcdfile(map_path)
 
     # --- Setup Map KDTree (For ray casting) ---
+
     print("Building KDTree for occlusion check...")
+
     map_pcd = o3d.geometry.PointCloud()
+
     map_pcd.points = o3d.utility.Vector3dVector(map_points_np)
-    map_tree = o3d.geometry.KDTreeFlann(map_pcd) 
+
+    map_tree = o3d.geometry.KDTreeFlann(map_pcd)
+
+
 
     # --- Rosbags Setup ---
-    typestore = get_typestore(Stores.ROS1_NOETIC) 
+
+    typestore = get_typestore(Stores.ROS1_NOETIC)
+
     cnt = 0 # frame counter
-    start_time = time.time() 
+
+    start_time = time.time()
+
+
 
     print(f"Processing bag: {bag_path} (Read-only Simulation)")
 
+
+
     with AnyReader([bag_path], default_typestore=typestore) as reader:
-        
+
+       
+
         connections = [x for x in reader.connections if x.topic == lidar_topic_in or x.topic == imu_topic]
+
         total_msgs = len(list(reader.messages(connections=connections)))
+
         print(f"Total messages to process: {total_msgs}")
+
+
 
         msg_iter = reader.messages(connections=connections)
 
+
+
         for i, (connection, timestamp, rawdata) in enumerate(msg_iter):
-            
+
             # --- IMU: Skip ---
             if connection.topic == imu_topic:
                 pass
-
             # --- LiDAR: Simulation & Registration ---
+
             elif connection.topic == lidar_topic_in:
+
                 if cnt >= len(gt_x):
-                    continue 
+                    continue
 
                 # 1. Deserialize & Extract Points
                 msg = reader.deserialize(rawdata, connection.msgtype)
                 iteration = int(msg.data.shape[0]/topic_length)
                 bin_points = np.frombuffer(msg.data, dtype=np.uint8).reshape(iteration, topic_length)
                 lx, ly, lz = binary_to_xyz(bin_points) # Assuming this function exists
-                
+
                 # Local -> World (using GT)
+
                 local_points = np.vstack((lx, ly, lz)).T
                 sensor_pos = [gt_x[cnt], gt_y[cnt], gt_z[cnt]]
                 sensor_quat = [gt_qw[cnt], gt_qx[cnt], gt_qy[cnt], gt_qz[cnt]]
-                
                 wx, wy, wz = coord_trans.local_to_world(local_points, sensor_pos, sensor_quat)
+
                 lidar_points_world = np.vstack((wx, wy, wz)).T
 
                 # 2. Simulation Process
                 # (a) Occlusion Check
-                is_reflected = mirror_simulation.check_intersection(
-                    lidar_points_world, mirror_center, mirror_width, mirror_height, mirror_yaw_base, sensor_pos
-                )
+                t1 = time.time()
+                is_reflected = mirror_simulation.faster_check_intersection(
+                lidar_points_world, mirror_center, mirror_width, mirror_height, mirror_yaw_base, sensor_pos)
+                #print(f"Check Intersection:{(time.time() - t1):.3f}sec")
                 P_visible = lidar_points_world[~is_reflected]
 
                 # (b) Mirror Image Generation (Line of Sight Check)
+                t2 = time.time()
                 is_mirror_visible_los = mirror_simulation.check_line_of_sight(
-                    map_tree, sensor_pos, mirror_center, step=0.2, radius=0.15
-                )
+                map_tree, sensor_pos, mirror_center, step=0.2, radius=0.15)
+                #print(f"Check line of sight:{(time.time() - t2):.3f}sec")
 
                 P_virtual_fov = np.empty((0, 3))
+
+                t3 = time.time()
                 if is_mirror_visible_los:
+
                     # Calculate dynamic mirror yaw (Triangular Wave)
                     mirror_yaw = decide_mirror_yaw_triangular(mirror_yaw_base, swing_range, swing_speed, cnt / lidar_freq)
-
                     yaw_rad = np.deg2rad(mirror_yaw)
+
                     Rz = np.array([
+
                         [np.cos(yaw_rad), -np.sin(yaw_rad), 0],
+
                         [np.sin(yaw_rad),  np.cos(yaw_rad), 0],
+
                         [0, 0, 1]
+
                     ])
+
                     P_virtual_raw, _ = mirror_simulation.reflection_sim(
-                        map_points_np, sensor_pos, sensor_quat, 
-                        mirror_center, mirror_width, mirror_height, Rz
-                    )
+                        map_points_np, sensor_pos, sensor_quat,
+                        mirror_center, mirror_width, mirror_height, Rz)
+
                     # Assuming filter_by_fov is available
+
                     P_virtual_fov = filter_by_fov(
+
                         P_virtual_raw, sensor_pos, sensor_quat, fov_h=FOV_H, fov_v=FOV_V
+
                     )
+
+                #print(f"Reflection sim:{(time.time() - t3):.3f}sec")
 
                 # (c) Merge Points
                 simulated_points_world = np.vstack((P_visible, P_virtual_fov))
-                
+
                 # 3. World -> Local (for Scan Matching Input)
                 simulated_points_local = coord_trans.world_to_local(simulated_points_world, sensor_pos, sensor_quat)
 
@@ -211,39 +288,37 @@ def simulator(param_yaw_center, param_swing_speed, param_swing_range):
                 elif source_points is None: # 1st registration
                     source_points = simulated_points_local
                     GICP_result = registration.registration_main(target_points, source_points, config)
-
                     global_transform = global_transform @ GICP_result.T_target_source
-                    
                     estimate_x.append(global_transform[0, 3])
                     estimate_y.append(global_transform[1, 3])
                     estimate_z.append(global_transform[2, 3])
-                
+
                 else: # Sequential registration
+
                     target_points = source_points
                     source_points = simulated_points_local
                     GICP_result = registration.registration_main(target_points, source_points, config)
-
                     global_transform = global_transform @ GICP_result.T_target_source
-                    
                     estimate_x.append(global_transform[0, 3])
                     estimate_y.append(global_transform[1, 3])
                     estimate_z.append(global_transform[2, 3])
 
                 cnt += 1
-            
+
             # Progress log
-            if i % 100 == 0:
-                print(f"Processed {i} messages... (LiDAR Frames: {cnt})")
+            #if i % 100 == 0:
+            #    print(f"Processed {i} messages... (LiDAR Frames: {cnt})")
 
     elapsed = time.time() - start_time
     print(f"Finished simulation. Time elapsed: {elapsed:.2f} seconds.")
 
     # --- Error Evaluation ---
+
     # Adjust GT length to match estimated length
+
     min_len = min(len(gt_x), len(estimate_x))
     ground_truth_trajectory = np.vstack((gt_x[:min_len], gt_y[:min_len], gt_z[:min_len])).T
     estimated_trajectory = np.vstack((estimate_x[:min_len], estimate_y[:min_len], estimate_z[:min_len])).T
-
     # Calculate Error
     errors = error_estimate.calc_trans_error(ground_truth_trajectory, estimated_trajectory)
     print(f"Mean Error: {np.mean(errors):.3f}m, Std: {np.std(errors):.3f}m")
@@ -251,21 +326,77 @@ def simulator(param_yaw_center, param_swing_speed, param_swing_range):
     return np.mean(errors)
 
 def objective(trial):
+    #mirror_x = trial.suggest_float('mirror_pos_x', 0, 10)
+    #mirror_y = trial.suggest_float('mirror_pos_y', -12, 0)
     mirror_orientation = trial.suggest_float('mirror_orientation_yaw', -180, 180)
     swing_speed = trial.suggest_float('mirror_swing_speed', 0, 20.0)
-    swing_range = trial.suggest_float('mirror_swing_range', 0, 90)
+    swing_range = trial.suggest_float('mirror_swing_range', 60, 120)
 
-    obj_error = simulator(mirror_orientation, swing_speed, swing_range)
+    #obj_error = simulator(mirror_orientation, swing_speed, swing_range)
+    obj_error = simulator(mirror_orientation, swing_speed, swing_range) # mirror location
     print(f"Mean Error:{obj_error:.3f}m")
     return obj_error
 
 if __name__ == "__main__":
+    start_time = time.time()
+    # 1. 最適化の実行 (方向: maximize = エラーを最大化したい場合)
+    # 通常、キャリブレーションなら minimize ですが、攻撃シミュレーションなら maximize が正しいです
     optimization = optuna.create_study(direction='maximize')
-    optimization.optimize(objective, n=3)
-
-    print(f'Best value: {optimization.best_value}')
-    print(f'Best param: {optimization.best_params}')
     
+    print("Start Optimization...")
+    optimization.optimize(objective, n_trials=100)
+    # 並列化して実行
+    #optimization.optimize(objective, n_trials=10, n_jobs=4)
+
+    # 2. 最良の結果を表示
+    print("\n" + "="*50)
+    print(f'Best Value (Max Error): {optimization.best_value:.4f} m')
+    print(f'Best Params: {optimization.best_params}')
+    print("="*50 + "\n")
+
+    # 3. パラメータ履歴をコマンドラインに表示
+    print("--- Optimization History ---")
+    # ヘッダー
+    print(f"{'Trial':<6} | {'Value (Error)':<15} | {'Yaw':<10} | {'X':<10} | {'Y':<10}")
+    
+    trials_values = []
+    trials_numbers = []
+
+    for trial in optimization.trials:
+        if trial.state == optuna.trial.TrialState.COMPLETE:
+            val = trial.value
+            p_yaw = trial.params['mirror_orientation_yaw']
+            p_spd = trial.params['mirror_swing_speed']
+            p_rng = trial.params['mirror_swing_range']
+            #p_x = trial.params['mirror_pos_x']
+            #p_y = trial.params['mirror_pos_y']
+            
+            print(f"{trial.number:<6} | {val:<15.4f} | {p_yaw:<10.2f} | {p_spd:<10.2f} | {p_rng:<10.2f}")
+            
+            trials_numbers.append(trial.number)
+            trials_values.append(val)
+
+    print(f"Total optimize time{time.time() - start_time}")
+
+    # 4. スコア推移をグラフでプロット
+    plt.figure(figsize=(10, 6))
+    plt.plot(trials_numbers, trials_values, marker='o', linestyle='-', color='b', label='Optimization History')
+    
+    # 最高値のラインを描画
+    best_val = optimization.best_value
+    plt.axhline(y=best_val, color='r', linestyle='--', label=f'Best Value: {best_val:.4f}')
+
+    plt.title('Optuna Optimization History')
+    plt.xlabel('Trial Number')
+    plt.ylabel('Objective Value (Mean Error [m])')
+    plt.grid(True)
+    plt.legend()
+    plt.tight_layout()
+    
+    # グラフを表示
+    print("\nDisplaying plot...")
+    plt.show()
+
 
 
 

@@ -2,6 +2,7 @@ import numpy as np
 import open3d as o3d
 import time, json
 from pathlib import Path
+import matplotlib.pyplot as plt
 
 # rosbags libraries
 from rosbags.highlevel import AnyReader
@@ -94,9 +95,9 @@ if __name__ == "__main__":
     mirror_center = [8.0, 0, 0.4]
     mirror_width = 1.0
     mirror_height = 0.4
-    mirror_yaw_base = -30 # base yaw angle (degrees)
-    swing_speed = 5.0  # degrees per second
-    swing_range = 30.0 # degrees(±)
+    mirror_yaw_base = 121.7 # base yaw angle (degrees)
+    swing_speed = 5.09  # degrees per second
+    swing_range =  107.77 # degrees(±)
     
     # LiDAR Config
     FOV_H = 120.0
@@ -119,7 +120,7 @@ if __name__ == "__main__":
     gt_pose = Path("./traj_lidar.txt") # Ground Truth pose
     gt_x, gt_y, gt_z, gt_qw, gt_qx, gt_qy, gt_qz = load_files.load_benign_pose(gt_pose)
 
-    map_pcd_path = Path("./benign_pcd_full.pcd") 
+    map_pcd_path = Path("./12_23_map.pcd") 
     map_points_np = load_files.load_pcdfile(map_pcd_path)
 
     # --- Setup Map KDTree (For ray casting) ---
@@ -251,4 +252,7 @@ if __name__ == "__main__":
     errors = error_estimate.calc_trans_error(ground_truth_trajectory, estimated_trajectory)
     print(f"Mean Error:{np.mean(errors):.3f}m Std:{np.std(errors):.3f}m")
 
-
+    plt.plot(gt_x, gt_y, color="blue", label="Ground Truth")
+    plt.plot(estimate_x, estimate_y, color="red", label="Mirror Attacked")
+    plt.legend()
+    plt.show()

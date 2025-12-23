@@ -156,11 +156,11 @@ if __name__ == "__main__":
 
     # Mirror Config
     mirror_center = [8.0, 0, 0.4]
-    mirror_width = 1.0
-    mirror_height = 0.4
-    mirror_yaw_base = -45 # base yaw angle (degrees)
-    swing_speed = 5.0  # degrees per second
-    swing_range = 30.0 # degrees(±)
+    mirror_width = 2.0
+    mirror_height = 0.8
+    mirror_yaw_base = 121.7 # base yaw angle (degrees)
+    swing_speed = 5.09  # degrees per second
+    swing_range =  107.77 # degrees(±)
     
     # LiDAR Config
     FOV_H = 120.0
@@ -182,7 +182,7 @@ if __name__ == "__main__":
     gt_pose = Path("./traj_lidar.txt")
     gt_x, gt_y, gt_z, gt_qw, gt_qx, gt_qy, gt_qz = load_files.load_benign_pose(gt_pose)
 
-    map_pcd_path = Path("./benign_pcd_full.pcd") # ファイル名を確認してください
+    map_pcd_path = Path("./12_23_map.pcd") # ファイル名を確認してください
     map_points_np = load_files.load_pcdfile(map_pcd_path)
 
     # --- Open3D Setup ---
