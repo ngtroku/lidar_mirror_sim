@@ -169,8 +169,6 @@ def simulator(param_yaw_center, param_swing_speed, param_swing_range):
 
     map_tree = o3d.geometry.KDTreeFlann(map_pcd)
 
-
-
     # --- Rosbags Setup ---
 
     typestore = get_typestore(Stores.ROS1_NOETIC)
