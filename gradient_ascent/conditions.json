@@ -1,0 +1,24 @@
+{
+  "main": {
+    "bag_path": "C:\\Users\\shint\\mirror_sim\\test_environment\\utils\\tuhh_09_os1_lidar.bag",
+    "gt_path": "./estimated_pose.csv",
+    "temp_path": "./temp_smvs.csv",
+    "map_path": "./mcd_tuhh.pcd",
+    "lidar_topic": "/os_cloud_node/points",
+    "imu_topic": "/os_cloud_node/imu"
+  },
+  "mirror": {
+    "center": [8.0, 0, 0.0],
+    "width": 2.0,
+    "height": 0.8,
+    "yaw_base": -30,
+    "swing_speed": 5.0,
+    "swing_range": 105.0
+  },
+  "lidar": {
+    "fov_h": 360.0,
+    "fov_v": 90.0,
+    "topic_length": 48,
+    "frequency": 10.0
+  }
+}
